@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Watches Hydra's icon asset folder and applies the hydra-fix treatment
+# to any new/updated game automatically.
+set -u
+
+ASSETS="${HOME}/.config/hydralauncher/Assets"
+LOG_DIR="${HOME}/.config/hydralauncher/logs"
+
+notify() {
+  # debounce: multiple events fire per file; wait for things to settle
+  sleep 3
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hydra-icon-fix.lock"
+  flock -n 9 || return
+  "${HOME}/.local/bin/hydra-fix"
+}
+
+# filesystem watcher: new icon dirs / icon files / desktop files trigger a fix
+"${HOME}/.local/bin/hydra-fix"
+inotifywait -m -r -q \
+  -e create -e moved_to -e modify,close_write \
+  "${ASSETS}" \
+  "${HOME}/Desktop" \
+  "${LOG_DIR}" |
+while read -r dir _ file; do
+  case "${file}" in
+    *.desktop|*.ico|*.png|*.webp|umu.log) notify ;;
+  esac
+done

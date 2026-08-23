@@ -1,0 +1,13 @@
+[Unit]
+Description=Hydra icon shortcut watcher
+After=graphical-session.target
+ConditionPathExists=%h/.config/hydralauncher/Assets
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hydra-watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

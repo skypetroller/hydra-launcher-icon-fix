@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+"""Hydra launcher icon & shortcut fixer.
+
+For every Hydra game:
+  - extracts the largest frame of the cached .ico/.png into
+    $HOME/.local/share/icons/hicolor/256x256/apps/steam_icon_<appid>.png
+  - creates/repairs a visible .desktop in $HOME/.local/share/applications/
+    named "<Game>.desktop" with Icon=steam_icon_<appid> and a correct
+    StartupWMClass (steam_app_<appid> for umu/Proton games).
+"""
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+ASSETS = HOME / ".config" / "hydralauncher" / "Assets"
+ICON_DIR = HOME / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps"
+APP_DIR = HOME / ".local" / "share" / "applications"
+DESKTOP_DIR = HOME / "Desktop"
+UMU_LOG = HOME / ".config" / "hydralauncher" / "logs" / "umu.log"
+
+# Hydra launcher binary used by the generated shortcuts.
+HYDRA_BIN = os.environ.get("HYDRA_BIN", "/opt/Hydra/hydralauncher")
+
+# appid -> friendly display name. These override any name derived from logs.
+KNOWN_NAMES = {
+    "1030300": "Hollow Knight Silksong",
+    "1313140": "Cult of the Lamb",
+    "1623730": "Palworld",
+    "1794680": "Vampire Survivors",
+    "2005010": "Warhammer 40000 Boltgun",
+    "2138710": "Sifu",
+    "239820": "Game Dev Tycoon",
+    "250900": "The Binding of Isaac: Rebirth",
+    "2651280": "Marvel's Spider-Man 2",
+    "2868840": "Slay the Spire 2",
+    "3164500": "Schedule I",
+    "3405340": "Megabonk",
+    "413150": "Stardew Valley",
+    "632360": "Risk of Rain 2",
+}
+
+
+def log(msg):
+    print(f"[hydra-fix] {msg}")
+
+
+def detect_names_from_umu_log():
+    """appid -> game display name derived from the launched executable name."""
+    result = {}
+    if not UMU_LOG.exists():
+        return result
+    for line in UMU_LOG.read_text(errors="ignore").splitlines():
+        if "Command:" not in line or "umu-" not in line or ".exe" not in line:
+            continue
+        m = re.search(r"umu-(\d+)", line)
+        p = re.search(r"'([^']+\.exe)'", line)
+        if not (m and p):
+            continue
+        appid = m.group(1)
+        path = p.group(1)
+        parts = path.replace("\\", "/").split("/")
+        name = None
+        for part in parts:
+            if part.lower().endswith(".exe"):
+                name = part[:-4]
+                break
+        if name:
+            result[appid] = name
+    return result
+
+
+def detect_umu_paths():
+    """Return every executable path Hydra has launched for each app ID."""
+    result = {}
+    if not UMU_LOG.exists():
+        return result
+    for line in UMU_LOG.read_text(errors="ignore").splitlines():
+        if "Command:" not in line or "umu-" not in line or ".exe" not in line:
+            continue
+        m = re.search(r"GAMEID='umu-(\d+)'", line)
+        p = re.search(r"'([^']+\.exe)'", line)
+        if m and p:
+            result.setdefault(m.group(1), []).append(Path(p.group(1)))
+    return result
+
+
+def detect_installed_games(umu_paths):
+    """Only treat an app as installed when one of its logged executables exists."""
+    return {
+        appid: next((path for path in reversed(paths) if path.is_file()), None)
+        for appid, paths in umu_paths.items()
+        if any(path.is_file() for path in paths)
+    }
+
+
+def title_case(name):
+    name = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
+    name = name.replace(" - Shipping", "").replace("-Win64", "").replace("WinGDK", "")
+    name = re.sub(r"\s+-\s+(SteamGG\.NET|SteamRIP\.com|Gamdie\.com).*$", "", name)
+    return name.strip()
+
+
+def find_game_name(appid, umu_names):
+    """Priority: KNOWN_NAMES (curated) -> existing .desktop Name -> umu.log name."""
+    if appid in KNOWN_NAMES:
+        return KNOWN_NAMES[appid]
+    for f in APP_DIR.glob("*.desktop"):
+        txt = f.read_text(errors="ignore")
+        if "hydralauncher://run" in txt and f"objectId={appid}" in txt:
+            m = re.search(r"^Name=(.+)$", txt, re.M)
+            if m and "Hidden=true" not in txt:
+                return m.group(1).strip()
+    return title_case(umu_names[appid]) if appid in umu_names else None
+
+
+def extract_icon(appid, d):
+    """Extract the largest frame from the icon files to a 256x256 png."""
+    out = ICON_DIR / f"steam_icon_{appid}.png"
+    sources = [
+        os.path.join(str(d), f)
+        for f in sorted(os.listdir(d))
+        if f.lower().endswith((".ico", ".png"))
+    ]
+    for src in sources:
+        r = subprocess.run(["identify", src], capture_output=True, text=True)
+        best_w = best_h = 0
+        best_frame = None
+        for line in r.stdout.splitlines():
+            m = re.search(r"(\d+)x(\d+)", line)
+            idx = re.search(r"\[(\d+)\]", line)
+            if m and idx:
+                w, h = int(m.group(1)), int(m.group(2))
+                if w * h > best_w * best_h:
+                    best_w, best_h = w, h
+                    best_frame = idx.group(1)
+        frame = f"{src}[{best_frame}]" if best_frame else src
+        for cmd in ([frame], [src]):
+            try:
+                subprocess.run(
+                    ["convert", cmd[0], "-resize", "256x256", "-depth", "8", str(out)],
+                    check=True, capture_output=True, text=True,
+                )
+                if out.exists() and out.stat().st_size > 0:
+                    return out
+            except Exception:
+                continue
+    return None
+
+
+def write_desktop(appid, name):
+    fn = APP_DIR / f"{name}.desktop"
+    tmp = fn.with_suffix(".desktop.tmp")
+    lines = [
+        "[Desktop Entry]",
+        "Version=1.0",
+        "Type=Application",
+        "Terminal=false",
+        f'Exec="{HYDRA_BIN}" "hydralauncher://run?shop=steam&objectId={appid}"',
+        f"Name={name}",
+        f"Icon=steam_icon_{appid}",
+        "Categories=Game;",
+        f"StartupWMClass=steam_app_{appid}",
+    ]
+    tmp.write_text("\n".join(lines) + "\n")
+    os.replace(tmp, fn)
+    return fn
+
+
+def purge_stale_entries(umu_paths, installed):
+    """Remove hidden, out-of-date, and demonstrably uninstalled shortcuts."""
+    removed = []
+    for f in APP_DIR.glob("*.desktop"):
+        txt = f.read_text(errors="ignore")
+        if "hydralauncher://run" not in txt:
+            continue
+        m = re.search(r"objectId=(\d+)", txt)
+        appid = m.group(1) if m else None
+        if appid in umu_paths and appid not in installed:
+            os.unlink(f)
+            removed.append(f.name)
+            continue
+        if "Hidden=true" in txt:
+            os.unlink(f)
+            removed.append(f.name)
+            continue
+        nm = re.search(r"^Name=(.+)$", txt, re.M)
+        if m and nm and m.group(1) in KNOWN_NAMES and nm.group(1) != KNOWN_NAMES[m.group(1)]:
+            os.unlink(f)
+            removed.append(f.name)
+    return removed
+
+
+def repair_desktop_shortcuts(umu_paths, installed):
+    """Fix Hydra-generated shortcuts on the Desktop (broken shebang,
+    .ico path icons, missing StartupWMClass)."""
+    fixed = []
+    if not DESKTOP_DIR.exists():
+        return fixed
+    for f in DESKTOP_DIR.glob("*.desktop"):
+        txt = f.read_text(errors="ignore")
+        original = txt
+        if "hydralauncher://run" not in txt:
+            continue
+        m = re.search(r"objectId=(\d+)", txt)
+        if not m:
+            continue
+        appid = m.group(1)
+        if appid in umu_paths and appid not in installed:
+            os.unlink(f)
+            fixed.append(f"removed {f.name}")
+            continue
+        if appid not in installed:
+            continue
+        txt = txt.replace("#!/user/bin/env xdg-open", "#!/usr/bin/env xdg-open")
+        txt = re.sub(r"^Icon=.*$", f"Icon=steam_icon_{appid}", txt, flags=re.M)
+        if "Name=" not in txt:
+            txt += f"Name=Hydra Game {appid}\n"
+        if "StartupWMClass=" not in txt:
+            txt += f"StartupWMClass=steam_app_{appid}\n"
+        if txt != original:
+            f.write_text(txt)
+            fixed.append(f.name)
+    return fixed
+
+
+def main():
+    ICON_DIR.mkdir(parents=True, exist_ok=True)
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    if not ASSETS.exists():
+        log("Hydra Assets dir missing; nothing to do.")
+        return 0
+    umu_paths = detect_umu_paths()
+    installed = detect_installed_games(umu_paths)
+    for s in purge_stale_entries(umu_paths, installed):
+        log(f"purged stale entry: {s}")
+    for s in repair_desktop_shortcuts(umu_paths, installed):
+        log(f"desktop shortcut: {s}")
+    umu_names = detect_names_from_umu_log()
+    fixed = []
+    for d in sorted(ASSETS.iterdir()):
+        if not d.is_dir() or not d.name.startswith("steam-"):
+            continue
+        appid = d.name.split("-", 1)[1]
+        if appid not in installed:
+            continue
+        if not extract_icon(appid, d):
+            log(f"WARN: no icon extracted for {appid}")
+            continue
+        name = find_game_name(appid, umu_names) or f"Hydra Game {appid}"
+        write_desktop(appid, name)
+        fixed.append((appid, name))
+    subprocess.run(["update-desktop-database", str(APP_DIR)], capture_output=True)
+    cache_root = HOME / ".local/share/icons/hicolor"
+    cache_result = subprocess.run(
+        ["gtk-update-icon-cache", "-f", str(cache_root)], capture_output=True
+    )
+    if cache_result.returncode != 0:
+        (cache_root / ".icon-theme.cache").unlink(missing_ok=True)
+    for a, n in fixed:
+        log(f"OK: {n} ({a})")
+    log(f"done: {len(fixed)} games")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
