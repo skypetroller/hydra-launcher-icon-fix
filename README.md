@@ -1,7 +1,7 @@
 # hydra-launcher-icon-fix
 
 Fixes missing/broken taskbar and app-menu icons for games installed through
-[Hydra Launcher](https://github.com/hydralauncher/hydra).
+[Hydra Launcher](https://github.com/hydralauncher/hydra) for Linux.
 
 ## The problem
 
