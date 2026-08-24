@@ -40,21 +40,45 @@ new games get the same treatment automatically.
 - inotify-tools (`inotifywait`)
 - A systemd user session (for the watcher)
 
+Install dependencies on Debian/Ubuntu:
+
+```sh
+sudo apt install -y imagemagick inotify-tools
+```
+
 ## Install
 
 ```sh
+git clone https://github.com/skypetroller/hydra-launcher-icon-fix.git
+cd hydra-launcher-icon-fix
 ./install.sh
 ```
 
-or manually:
+The installer copies `hydra-fix` and `hydra-watch` into `~/.local/bin`, installs
+`hydra-watch.service` as a systemd **user** unit, and enables + starts it.
+
+Or install manually:
 
 ```sh
+mkdir -p ~/.local/bin ~/.config/systemd/user
 install -m 0755 hydra-fix  ~/.local/bin/hydra-fix
 install -m 0755 hydra-watch ~/.local/bin/hydra-watch
-mkdir -p ~/.config/systemd/user
 install -m 0644 hydra-watch.service ~/.config/systemd/user/hydra-watch.service
 systemctl --user daemon-reload
 systemctl --user enable --now hydra-watch.service
+```
+
+Make sure `~/.local/bin` is on your `PATH` (most distros add it automatically if
+the directory exists). If not, add `export PATH="$HOME/.local/bin:$PATH"` to your
+`~/.profile`.
+
+## Uninstall
+
+```sh
+systemctl --user disable --now hydra-watch.service
+rm -f ~/.config/systemd/user/hydra-watch.service
+rm -f ~/.local/bin/hydra-fix ~/.local/bin/hydra-watch
+systemctl --user daemon-reload
 ```
 
 ## Notes
