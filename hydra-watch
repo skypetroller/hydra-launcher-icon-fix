@@ -6,6 +6,7 @@ set -euo pipefail
 ASSETS="${HOME}/.config/hydralauncher/Assets"
 DESKTOP_DIR="${HOME}/Desktop"
 LOG_DIR="${HOME}/.config/hydralauncher/logs"
+DB_DIR="${HOME}/.config/hydralauncher/hydra-db"
 
 if ! command -v inotifywait >/dev/null 2>&1; then
   printf '%s\n' "hydra-watch: inotifywait is required (install inotify-tools)." >&2
@@ -36,11 +37,14 @@ fi
 if [[ -d "${LOG_DIR}" ]]; then
   WATCH_PATHS+=("${LOG_DIR}")
 fi
+if [[ -d "${DB_DIR}" ]]; then
+  WATCH_PATHS+=("${DB_DIR}")
+fi
 inotifywait -m -r -q \
   -e create -e moved_to -e modify,close_write \
   "${WATCH_PATHS[@]}" |
 while read -r dir _ file; do
   case "${file}" in
-    *.desktop|*.ico|*.png|*.webp|umu.log) notify ;;
+    *.desktop|*.ico|*.png|*.webp|*.ldb|*.log|CURRENT|MANIFEST-*) notify ;;
   esac
 done

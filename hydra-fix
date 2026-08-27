@@ -8,10 +8,13 @@ For every Hydra game:
     named "<Game>.desktop" with Icon=steam_icon_<appid> and a correct
     StartupWMClass (steam_app_<appid> for umu/Proton games).
 """
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HOME = Path.home()
@@ -20,6 +23,7 @@ ICON_DIR = HOME / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps"
 APP_DIR = HOME / ".local" / "share" / "applications"
 DESKTOP_DIR = HOME / "Desktop"
 UMU_LOG = HOME / ".config" / "hydralauncher" / "logs" / "umu.log"
+HYDRA_DB = HOME / ".config" / "hydralauncher" / "hydra-db"
 
 # Hydra launcher binary used by the generated shortcuts.
 HYDRA_BIN = os.environ.get("HYDRA_BIN", "/opt/Hydra/hydralauncher")
@@ -87,8 +91,113 @@ def detect_umu_paths():
     return result
 
 
-def detect_installed_games(umu_paths):
-    """Only treat an app as installed when one of its logged executables exists."""
+def detect_hydra_db_games():
+    """Read Hydra's current game records from a temporary database snapshot.
+
+    Hydra keeps the database locked while it is running, so the snapshot avoids
+    competing with Hydra for the live LevelDB lock. This is optional: callers
+    fall back to the launch log when Hydra's bundled LevelDB module is not
+    available.
+    """
+    if not HYDRA_DB.is_dir() or not Path(HYDRA_BIN).is_file():
+        return None
+
+    node_paths = []
+    hydra_root = Path(HYDRA_BIN).parent
+    for path in (
+        hydra_root / "resources" / "app.asar" / "node_modules",
+        hydra_root / "resources" / "app.asar.unpacked" / "node_modules",
+    ):
+        if path.is_dir():
+            node_paths.append(str(path))
+    if not node_paths:
+        return None
+
+    query = r'''
+const { ClassicLevel } = require("classic-level");
+const db = new ClassicLevel(process.env.HYDRA_DB_SNAPSHOT, {
+  keyEncoding: "utf8",
+  valueEncoding: "utf8",
+  createIfMissing: false
+});
+(async () => {
+  await db.open();
+  try {
+    for await (const [key, value] of db.iterator({ gte: "!games!", lt: "!games~" })) {
+      if (!key.startsWith("!games!")) continue;
+      const game = JSON.parse(value);
+      console.log(JSON.stringify({
+        id: game.objectId,
+        title: game.title || null,
+        isDeleted: game.isDeleted === true,
+        executablePath: game.executablePath || null
+      }));
+    }
+  } finally {
+    await db.close();
+  }
+})().catch(error => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
+'''
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="hydra-db-") as temp_dir:
+            snapshot = Path(temp_dir) / "db"
+            shutil.copytree(
+                HYDRA_DB,
+                snapshot,
+                ignore=shutil.ignore_patterns("LOCK"),
+            )
+            env = os.environ.copy()
+            env["ELECTRON_RUN_AS_NODE"] = "1"
+            env["HYDRA_DB_SNAPSHOT"] = str(snapshot)
+            env["NODE_PATH"] = os.pathsep.join(
+                node_paths + ([env["NODE_PATH"]] if env.get("NODE_PATH") else [])
+            )
+            result = subprocess.run(
+                [HYDRA_BIN, "-e", query],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=env,
+            )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    records = {}
+    for line in result.stdout.splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("id"):
+            records[str(record["id"])] = record
+    return records
+
+
+def detect_installed_games(umu_paths, db_games=None):
+    """Return installed games from Hydra's current records, with log fallback."""
+    if db_games is not None:
+        installed = {}
+        for appid, record in db_games.items():
+            path = record.get("executablePath")
+            if not record.get("isDeleted") and path and Path(path).is_file():
+                installed[appid] = Path(path)
+
+        # Keep supporting older or partially migrated records that exist only
+        # in the launch log.
+        for appid, paths in umu_paths.items():
+            if appid not in db_games:
+                existing = next((path for path in reversed(paths) if path.is_file()), None)
+                if existing:
+                    installed[appid] = existing
+        return installed
+
     return {
         appid: next((path for path in reversed(paths) if path.is_file()), None)
         for appid, paths in umu_paths.items()
@@ -103,10 +212,12 @@ def title_case(name):
     return name.strip()
 
 
-def find_game_name(appid, umu_names):
+def find_game_name(appid, umu_names, db_games=None):
     """Priority: KNOWN_NAMES (curated) -> existing .desktop Name -> umu.log name."""
     if appid in KNOWN_NAMES:
         return KNOWN_NAMES[appid]
+    if db_games and db_games.get(appid, {}).get("title"):
+        return db_games[appid]["title"]
     for f in APP_DIR.glob("*.desktop"):
         txt = f.read_text(errors="ignore")
         if "hydralauncher://run" in txt and f"objectId={appid}" in txt:
@@ -179,7 +290,7 @@ def write_desktop(appid, name):
     return fn
 
 
-def purge_stale_entries(umu_paths, installed):
+def purge_stale_entries(umu_paths, installed, db_games=None):
     """Remove hidden, out-of-date, and demonstrably uninstalled shortcuts."""
     removed = []
     for f in APP_DIR.glob("*.desktop"):
@@ -188,7 +299,9 @@ def purge_stale_entries(umu_paths, installed):
             continue
         m = re.search(r"objectId=(\d+)", txt)
         appid = m.group(1) if m else None
-        if appid in umu_paths and appid not in installed:
+        deleted = db_games and appid in db_games and db_games[appid].get("isDeleted")
+        log_path_missing = appid in umu_paths and appid not in installed
+        if deleted or (db_games is None and log_path_missing):
             os.unlink(f)
             removed.append(f.name)
             continue
@@ -203,7 +316,7 @@ def purge_stale_entries(umu_paths, installed):
     return removed
 
 
-def repair_desktop_shortcuts(umu_paths, installed):
+def repair_desktop_shortcuts(umu_paths, installed, db_games=None):
     """Fix Hydra-generated shortcuts on the Desktop (broken shebang,
     .ico path icons, missing StartupWMClass)."""
     fixed = []
@@ -218,7 +331,9 @@ def repair_desktop_shortcuts(umu_paths, installed):
         if not m:
             continue
         appid = m.group(1)
-        if appid in umu_paths and appid not in installed:
+        deleted = db_games and appid in db_games and db_games[appid].get("isDeleted")
+        log_path_missing = appid in umu_paths and appid not in installed
+        if deleted or (db_games is None and log_path_missing):
             os.unlink(f)
             fixed.append(f"removed {f.name}")
             continue
@@ -250,10 +365,11 @@ def main():
         log("Hydra Assets dir missing; nothing to do.")
         return 0
     umu_paths = detect_umu_paths()
-    installed = detect_installed_games(umu_paths)
-    for s in purge_stale_entries(umu_paths, installed):
+    db_games = detect_hydra_db_games()
+    installed = detect_installed_games(umu_paths, db_games)
+    for s in purge_stale_entries(umu_paths, installed, db_games):
         log(f"purged stale entry: {s}")
-    for s in repair_desktop_shortcuts(umu_paths, installed):
+    for s in repair_desktop_shortcuts(umu_paths, installed, db_games):
         log(f"desktop shortcut: {s}")
     umu_names = detect_names_from_umu_log()
     fixed = []
@@ -266,7 +382,7 @@ def main():
         if not extract_icon(appid, d):
             log(f"WARN: no icon extracted for {appid}")
             continue
-        name = find_game_name(appid, umu_names) or f"Hydra Game {appid}"
+        name = find_game_name(appid, umu_names, db_games) or f"Hydra Game {appid}"
         write_desktop(appid, name)
         fixed.append((appid, name))
     subprocess.run(["update-desktop-database", str(APP_DIR)], capture_output=True)

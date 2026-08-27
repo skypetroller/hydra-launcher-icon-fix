@@ -28,11 +28,14 @@ of their real artwork.
   replaces `.ico` path icons, adds the correct `StartupWMClass`).
 - Removes stale `Hidden=true` entries and entries whose game executable no
   longer exists on disk.
+- Reads Hydra's current game records from a temporary copy of its LevelDB
+  database when Hydra's bundled Electron runtime is available. This lets the
+  fixer recognize a newly downloaded game before its first launch. It falls
+  back to Hydra's `umu.log` when the database cannot be read.
 
-`hydra-watch` (bash + inotifywait): watches Hydra's Assets folder, Desktop, and
-launch log, and re-runs `hydra-fix` when a game is launched or its shortcut/icon
-changes. New games are handled automatically once Hydra records their
-executable, normally on the first launch. Old icon-cache folders alone are not
+`hydra-watch` (bash + inotifywait): watches Hydra's Assets folder, Desktop,
+launch log, and database, and re-runs `hydra-fix` when a game is downloaded,
+launched, or its shortcut/icon changes. Old icon-cache folders alone are not
 treated as installed games.
 
 ## Requirements
@@ -42,6 +45,9 @@ treated as installed games.
 - inotify-tools (`inotifywait`)
 - `flock` (usually provided by util-linux)
 - A systemd user session (for the watcher)
+
+The fixer uses Hydra's bundled Electron/LevelDB modules when available; this is
+optional and does not add a separate runtime dependency.
 
 Install dependencies on Debian/Ubuntu:
 
@@ -109,12 +115,20 @@ The generated game shortcuts and cached icons are left in place by uninstall so
 the command does not remove user-created launchers. Remove unwanted entries
 from `~/.local/share/applications` and `~/.local/share/icons/hicolor` manually.
 
+## Test
+
+Run the local tests with:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
 ## Notes
 
 - Game display names are curated in `KNOWN_NAMES` inside `hydra-fix`; names not
-  listed there are derived from the launched executable. Add entries there for
-  your own games, or set `HYDRA_BIN` if Hydra is installed somewhere other than
-  `/opt/Hydra/hydralauncher`.
+  listed there come from Hydra's database or launched executable. Add entries
+  there for your own games, or set `HYDRA_BIN` if Hydra is installed somewhere
+  other than `/opt/Hydra/hydralauncher`.
 - The watcher runs once at startup and on every relevant filesystem event. Run
   `~/.local/bin/hydra-fix` manually after moving a game to a new location before
   launching it again.
