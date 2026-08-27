@@ -57,6 +57,9 @@ sudo apt install -y imagemagick inotify-tools
 
 ## Install
 
+Run the installer as your normal desktop user, not with `sudo`. It installs a
+systemd **user** service and writes only to your home directory.
+
 ```sh
 git clone https://github.com/skypetroller/hydra-launcher-icon-fix.git
 cd hydra-launcher-icon-fix
@@ -65,6 +68,10 @@ cd hydra-launcher-icon-fix
 
 The installer copies `hydra-fix` and `hydra-watch` into `~/.local/bin`, installs
 `hydra-watch.service` as a systemd **user** unit, and enables + starts it.
+
+Hydra should have been started at least once before installation so its
+`Assets`, database, and log directories exist. If they do not exist yet, start
+Hydra, then run `./install.sh` again.
 
 Or install manually:
 
@@ -102,6 +109,41 @@ Add:
 [Service]
 Environment=HYDRA_BIN=/path/to/hydralauncher
 ```
+
+Then restart the service:
+
+```sh
+systemctl --user restart hydra-watch.service
+```
+
+## Update
+
+Pull the latest version and reinstall it. The installer explicitly restarts an
+already-running service, so updated scripts are loaded immediately:
+
+```sh
+cd hydra-launcher-icon-fix
+git pull --ff-only
+./install.sh
+```
+
+## Troubleshooting
+
+Run the fixer manually:
+
+```sh
+~/.local/bin/hydra-fix
+```
+
+Inspect the service and its recent log:
+
+```sh
+systemctl --user status hydra-watch.service
+journalctl --user -u hydra-watch.service -n 50 --no-pager
+```
+
+If the service says its condition failed, make sure Hydra's
+`~/.config/hydralauncher/Assets` directory exists, then restart the service.
 
 ## Uninstall
 
