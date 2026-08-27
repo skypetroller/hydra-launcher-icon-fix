@@ -249,7 +249,7 @@ def extract_icon(appid, d):
 
     # Prefer the highest-resolution frame, even when it is in a later file.
     candidates.sort(key=lambda candidate: candidate[0], reverse=True)
-    temp = out.with_name(f".{out.name}.tmp")
+    temp = out.with_name(f".{out.name}.tmp.png")
     for _, frame in candidates:
         temp.unlink(missing_ok=True)
         try:

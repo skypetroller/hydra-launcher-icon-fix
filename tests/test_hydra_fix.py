@@ -78,6 +78,13 @@ class HydraFixTests(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(dimensions.stdout, "256x256")
+            image_format = subprocess.run(
+                ["identify", "-format", "%m", str(result)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(image_format.stdout, "PNG")
             color = subprocess.run(
                 [
                     "convert",
