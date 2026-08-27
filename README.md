@@ -12,7 +12,7 @@ installed into the icon theme. It also marks its application-menu entries
 `Hidden=true` and sets a `StartupWMClass` that does not match the real window
 class of the game (which, for umu/Proton launches, is `steam_app_<appid>`).
 
-The result: games show a generic/blank icon in the GNOME taskbar instead
+The result: games show a generic/blank icon in the GNOME/KDE taskbar instead
 of their real artwork.
 
 ## What it does
