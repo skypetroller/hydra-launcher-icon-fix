@@ -24,5 +24,4 @@ systemctl --user daemon-reload
 systemctl --user enable hydra-watch.service
 systemctl --user restart hydra-watch.service
 
-echo "Installed. Running once now..."
-"${BIN_DIR}/hydra-fix"
+echo "Installed and watcher started."
