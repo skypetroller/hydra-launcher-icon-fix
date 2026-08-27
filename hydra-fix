@@ -124,34 +124,44 @@ def extract_icon(appid, d):
         for f in sorted(os.listdir(d))
         if f.lower().endswith((".ico", ".png"))
     ]
+    candidates = []
     for src in sources:
         r = subprocess.run(["identify", src], capture_output=True, text=True)
-        best_w = best_h = 0
-        best_frame = None
         for line in r.stdout.splitlines():
             m = re.search(r"(\d+)x(\d+)", line)
-            idx = re.search(r"\[(\d+)\]", line)
-            if m and idx:
-                w, h = int(m.group(1)), int(m.group(2))
-                if w * h > best_w * best_h:
-                    best_w, best_h = w, h
-                    best_frame = idx.group(1)
-        frame = f"{src}[{best_frame}]" if best_frame else src
-        for cmd in ([frame], [src]):
-            try:
-                subprocess.run(
-                    ["convert", cmd[0], "-resize", "256x256", "-depth", "8", str(out)],
-                    check=True, capture_output=True, text=True,
-                )
-                if out.exists() and out.stat().st_size > 0:
-                    return out
-            except Exception:
+            if not m:
                 continue
+            w, h = int(m.group(1)), int(m.group(2))
+            idx = re.search(r"\[(\d+)\]", line)
+            frame = f"{src}[{idx.group(1)}]" if idx else src
+            candidates.append((w * h, frame))
+
+    # Prefer the highest-resolution frame, even when it is in a later file.
+    candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+    temp = out.with_name(f".{out.name}.tmp")
+    for _, frame in candidates:
+        temp.unlink(missing_ok=True)
+        try:
+            subprocess.run(
+                ["convert", frame, "-resize", "256x256", "-depth", "8", str(temp)],
+                check=True, capture_output=True, text=True,
+            )
+            if temp.exists() and temp.stat().st_size > 0:
+                os.replace(temp, out)
+                return out
+        except Exception:
+            continue
+    temp.unlink(missing_ok=True)
     return None
 
 
 def write_desktop(appid, name):
-    fn = APP_DIR / f"{name}.desktop"
+    safe_name = re.sub(r"[\\/\x00]", "-", name).strip(" .") or f"Hydra Game {appid}"
+    fn = APP_DIR / f"{safe_name}.desktop"
+    if fn.exists():
+        existing = fn.read_text(errors="ignore")
+        if "hydralauncher://run" not in existing or f"objectId={appid}" not in existing:
+            fn = APP_DIR / f"hydra-{appid}.desktop"
     tmp = fn.with_suffix(".desktop.tmp")
     lines = [
         "[Desktop Entry]",
@@ -220,6 +230,13 @@ def repair_desktop_shortcuts(umu_paths, installed):
             txt += f"Name=Hydra Game {appid}\n"
         if "StartupWMClass=" not in txt:
             txt += f"StartupWMClass=steam_app_{appid}\n"
+        else:
+            txt = re.sub(
+                r"^StartupWMClass=.*$",
+                f"StartupWMClass=steam_app_{appid}",
+                txt,
+                flags=re.M,
+            )
         if txt != original:
             f.write_text(txt)
             fixed.append(f.name)

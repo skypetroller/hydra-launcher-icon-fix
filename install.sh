@@ -6,6 +6,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${HOME}/.local/bin"
 SERVICE_DIR="${HOME}/.config/systemd/user"
 
+for command in python3 convert identify inotifywait flock systemctl; do
+  if ! command -v "${command}" >/dev/null 2>&1; then
+    echo "Missing required command: ${command}" >&2
+    echo "Install dependencies with: sudo apt install imagemagick inotify-tools" >&2
+    exit 1
+  fi
+done
+
 mkdir -p "${BIN_DIR}" "${SERVICE_DIR}"
 
 install -m 0755 "${SCRIPT_DIR}/hydra-fix" "${BIN_DIR}/hydra-fix"

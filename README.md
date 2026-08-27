@@ -30,14 +30,17 @@ of their real artwork.
   longer exists on disk.
 
 `hydra-watch` (bash + inotifywait): watches Hydra's Assets folder, Desktop, and
-launch log, and re-runs `hydra-fix` whenever a game is downloaded/launched, so
-new games get the same treatment automatically.
+launch log, and re-runs `hydra-fix` when a game is launched or its shortcut/icon
+changes. New games are handled automatically once Hydra records their
+executable, normally on the first launch. Old icon-cache folders alone are not
+treated as installed games.
 
 ## Requirements
 
 - Python 3
 - ImageMagick (`convert`, `identify`)
 - inotify-tools (`inotifywait`)
+- `flock` (usually provided by util-linux)
 - A systemd user session (for the watcher)
 
 Install dependencies on Debian/Ubuntu:
@@ -72,6 +75,27 @@ Make sure `~/.local/bin` is on your `PATH` (most distros add it automatically if
 the directory exists). If not, add `export PATH="$HOME/.local/bin:$PATH"` to your
 `~/.profile`.
 
+Check the watcher with:
+
+```sh
+systemctl --user status hydra-watch.service
+journalctl --user -u hydra-watch.service -f
+```
+
+If Hydra is installed somewhere other than `/opt/Hydra/hydralauncher`, set the
+binary path for the user service:
+
+```sh
+systemctl --user edit hydra-watch.service
+```
+
+Add:
+
+```ini
+[Service]
+Environment=HYDRA_BIN=/path/to/hydralauncher
+```
+
 ## Uninstall
 
 ```sh
@@ -81,10 +105,16 @@ rm -f ~/.local/bin/hydra-fix ~/.local/bin/hydra-watch
 systemctl --user daemon-reload
 ```
 
+The generated game shortcuts and cached icons are left in place by uninstall so
+the command does not remove user-created launchers. Remove unwanted entries
+from `~/.local/share/applications` and `~/.local/share/icons/hicolor` manually.
+
 ## Notes
 
 - Game display names are curated in `KNOWN_NAMES` inside `hydra-fix`; names not
   listed there are derived from the launched executable. Add entries there for
   your own games, or set `HYDRA_BIN` if Hydra is installed somewhere other than
   `/opt/Hydra/hydralauncher`.
-- The watcher runs once at startup and on every relevant filesystem event.
+- The watcher runs once at startup and on every relevant filesystem event. Run
+  `~/.local/bin/hydra-fix` manually after moving a game to a new location before
+  launching it again.

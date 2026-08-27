@@ -1,26 +1,44 @@
 #!/usr/bin/env bash
 # Watches Hydra's icon asset folder and applies the hydra-fix treatment
 # to any new/updated game automatically.
-set -u
+set -euo pipefail
 
 ASSETS="${HOME}/.config/hydralauncher/Assets"
+DESKTOP_DIR="${HOME}/Desktop"
 LOG_DIR="${HOME}/.config/hydralauncher/logs"
+
+if ! command -v inotifywait >/dev/null 2>&1; then
+  printf '%s\n' "hydra-watch: inotifywait is required (install inotify-tools)." >&2
+  exit 1
+fi
+
+if [[ ! -d "${ASSETS}" ]]; then
+  printf '%s\n' "hydra-watch: Hydra Assets directory does not exist yet." >&2
+  exit 0
+fi
 
 notify() {
   # debounce: multiple events fire per file; wait for things to settle
   sleep 3
   exec 9>"${XDG_RUNTIME_DIR:-/tmp}/hydra-icon-fix.lock"
-  flock -n 9 || return
+  if ! flock -n 9; then
+    return 0
+  fi
   "${HOME}/.local/bin/hydra-fix"
 }
 
 # filesystem watcher: new icon dirs / icon files / desktop files trigger a fix
 "${HOME}/.local/bin/hydra-fix"
+WATCH_PATHS=("${ASSETS}")
+if [[ -d "${DESKTOP_DIR}" ]]; then
+  WATCH_PATHS+=("${DESKTOP_DIR}")
+fi
+if [[ -d "${LOG_DIR}" ]]; then
+  WATCH_PATHS+=("${LOG_DIR}")
+fi
 inotifywait -m -r -q \
   -e create -e moved_to -e modify,close_write \
-  "${ASSETS}" \
-  "${HOME}/Desktop" \
-  "${LOG_DIR}" |
+  "${WATCH_PATHS[@]}" |
 while read -r dir _ file; do
   case "${file}" in
     *.desktop|*.ico|*.png|*.webp|umu.log) notify ;;
