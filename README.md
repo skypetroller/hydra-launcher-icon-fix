@@ -74,7 +74,8 @@ install -m 0755 hydra-fix  ~/.local/bin/hydra-fix
 install -m 0755 hydra-watch ~/.local/bin/hydra-watch
 install -m 0644 hydra-watch.service ~/.config/systemd/user/hydra-watch.service
 systemctl --user daemon-reload
-systemctl --user enable --now hydra-watch.service
+systemctl --user enable hydra-watch.service
+systemctl --user restart hydra-watch.service
 ```
 
 Make sure `~/.local/bin` is on your `PATH` (most distros add it automatically if

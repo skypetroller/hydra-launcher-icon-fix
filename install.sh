@@ -21,7 +21,8 @@ install -m 0755 "${SCRIPT_DIR}/hydra-watch" "${BIN_DIR}/hydra-watch"
 install -m 0644 "${SCRIPT_DIR}/hydra-watch.service" "${SERVICE_DIR}/hydra-watch.service"
 
 systemctl --user daemon-reload
-systemctl --user enable --now hydra-watch.service
+systemctl --user enable hydra-watch.service
+systemctl --user restart hydra-watch.service
 
 echo "Installed. Running once now..."
 "${BIN_DIR}/hydra-fix"
