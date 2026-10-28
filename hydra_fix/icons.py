@@ -17,6 +17,16 @@ ICON_EXTENSIONS = (".ico", ".png", ".webp", ".jpg", ".jpeg", ".bmp", ".gif")
 ICON_SIZE = 256
 
 
+def _source_preference(source: Path) -> int:
+    """Rank filenames that are more likely to contain square game artwork."""
+    name = source.name.lower()
+    if name.startswith("icon"):
+        return 2
+    if name.startswith(("logo", "steam_icon")):
+        return 1
+    return 0
+
+
 @dataclass(frozen=True)
 class IconFrame:
     source: Path
@@ -133,8 +143,19 @@ def collect_frames(config: Config, asset_dir: Path, logger: Logger) -> list[Icon
             frames.extend(_frames_for_source(config, source, logger))
         except OSError as error:
             logger.debug(f"cannot read {source.name}: {error}")
-    # Prefer the highest resolution, regardless of which file contains it.
-    frames.sort(key=lambda frame: (frame.area, frame.width, frame.index), reverse=True)
+    # Prefer square icon artwork over larger hero banners and library art.
+    # Within that, prefer files named icon*, then logo*, then everything else;
+    # only after those preferences do we compare resolution.
+    frames.sort(
+        key=lambda frame: (
+            frame.width == frame.height,
+            _source_preference(frame.source),
+            frame.area,
+            frame.width,
+            -frame.index,
+        ),
+        reverse=True,
+    )
     return frames
 
 
@@ -173,7 +194,7 @@ def _extract_frame(
                     "-gravity",
                     "center",
                     "-resize",
-                    f"{ICON_SIZE}x{ICON_SIZE}",
+                    f"{ICON_SIZE}x{ICON_SIZE}^",
                     "-extent",
                     f"{ICON_SIZE}x{ICON_SIZE}",
                     "-depth",

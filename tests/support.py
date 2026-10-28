@@ -25,10 +25,20 @@ def image_command() -> list[str]:
     raise RuntimeError("ImageMagick is required for the test suite")
 
 
-def make_image(path: Path, size: int, color: str) -> None:
+def make_image(
+    path: Path, size: int, color: str, *, height: int | None = None
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    width = size
+    height = size if height is None else height
     subprocess.run(
-        [*image_command(), "-size", f"{size}x{size}", f"xc:{color}", str(path)],
+        [
+            *image_command(),
+            "-size",
+            f"{width}x{height}",
+            f"xc:{color}",
+            str(path),
+        ],
         check=True,
         capture_output=True,
     )

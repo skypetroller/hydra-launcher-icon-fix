@@ -33,7 +33,8 @@ nothing.
   database, falling back to `logs/umu.log` when the database cannot be read.
 - Extracts the largest usable frame from Hydra's cached `.ico`, `.png`,
   `.webp`, `.jpg`, or `.gif` artwork into
-  `~/.local/share/icons/hicolor/256x256/apps/steam_icon_<appid>.png`.
+  `~/.local/share/icons/hicolor/256x256/apps/steam_icon_<appid>.png`. Square
+  icon artwork is preferred over larger hero banners and library art.
 - Creates a visible application-menu shortcut for each game with the correct
   icon name and `StartupWMClass=steam_app_<appid>`.
 - Repairs existing Hydra shortcuts on the Desktop and in the application menu:

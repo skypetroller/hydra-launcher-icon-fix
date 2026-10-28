@@ -45,6 +45,22 @@ class IconTests(unittest.TestCase):
             ).stdout
             self.assertIn("0,0,255", color)
 
+    def test_square_icon_is_preferred_over_larger_hero_art(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = make_config(root)
+            assets = root / "Assets" / "steam-42"
+            make_image(assets / "hero.jpg", 400, "red", height=120)
+            make_image(assets / "icon.png", 64, "blue")
+
+            frames = collect_frames(config, assets, Logger(quiet=True))
+            self.assertEqual(frames[0].source.name, "icon.png")
+
+            result = extract_icon(config, "42", assets, Logger(quiet=True))
+            self.assertIsNotNone(result)
+            self.assertEqual(result.source.name, "icon.png")
+            self.assertTrue(validate_icon(config, result.path))
+
     def test_missing_icon_frames_returns_none(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
