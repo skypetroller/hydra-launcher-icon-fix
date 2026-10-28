@@ -1,13 +1,16 @@
 [Unit]
-Description=Hydra icon shortcut watcher
+Description=Hydra Launcher icon and shortcut watcher
+Documentation=https://github.com/skypetroller/hydra-launcher-icon-fix
 After=graphical-session.target
-ConditionPathExists=%h/.config/hydralauncher/Assets
 
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/hydra-watch
 Restart=on-failure
-RestartSec=5
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+# Optional overrides, for example HYDRA_CONFIG_DIR or HYDRA_BIN.
+EnvironmentFile=-%h/.config/hydra-launcher-icon-fix/env
 
 [Install]
 WantedBy=default.target
